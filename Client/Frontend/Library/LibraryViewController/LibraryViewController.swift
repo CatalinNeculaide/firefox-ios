@@ -15,7 +15,7 @@ extension LibraryViewController: UIToolbarDelegate {
 class LibraryViewController: UIViewController {
 
     struct UX {
-        struct SegmentControl {
+        struct NavigationMenu {
             static let height: CGFloat = 32
             static let width: CGFloat = 343
         }
@@ -160,8 +160,8 @@ class LibraryViewController: UIViewController {
             navigationToolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             navigationToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
-            librarySegmentControl.widthAnchor.constraint(equalToConstant: UX.SegmentControl.width),
-            librarySegmentControl.heightAnchor.constraint(equalToConstant: UX.SegmentControl.height),
+            librarySegmentControl.widthAnchor.constraint(equalToConstant: UX.NavigationMenu.width),
+            librarySegmentControl.heightAnchor.constraint(equalToConstant: UX.NavigationMenu.height),
 
             controllerContainerView.topAnchor.constraint(equalTo: navigationToolbar.bottomAnchor),
             controllerContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),

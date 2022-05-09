@@ -20,8 +20,10 @@ protocol TabTrayViewDelegate: UIViewController {
 class TabTrayViewController: UIViewController {
 
     struct UX {
-        static let navMenuWidth = 343
-        static let navMenuHeight = 32
+        struct NavigationMenu {
+            static let height: CGFloat = 32
+            static let width: CGFloat = 343
+        }
     }
 
     // MARK: - Variables
@@ -246,8 +248,8 @@ class TabTrayViewController: UIViewController {
         }
 
         navigationMenu.snp.makeConstraints { make in
-            make.width.lessThanOrEqualTo(UX.navMenuWidth)
-            make.height.equalTo(UX.navMenuHeight)
+            make.width.lessThanOrEqualTo(UX.NavigationMenu.width)
+            make.height.equalTo(UX.NavigationMenu.height)
         }
     }
 
