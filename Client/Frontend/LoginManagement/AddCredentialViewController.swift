@@ -17,7 +17,7 @@ enum AddCredentialField: Int {
     }
 }
 
-class AddCredentialViewController: UIViewController, Themeable {
+class AddCredentialViewController: SensitiveViewController, Themeable {
     var themeManager: ThemeManager
     var themeObserver: NSObjectProtocol?
     var notificationCenter: NotificationProtocol
@@ -37,6 +37,7 @@ class AddCredentialViewController: UIViewController, Themeable {
     fileprivate weak var passwordField: UITextField!
 
     fileprivate let didSaveAction: (LoginEntry) -> Void
+    fileprivate let dismissAction: () -> Void
 
     fileprivate lazy var cancelButton: UIBarButtonItem = {
         let button = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancel))
@@ -51,9 +52,11 @@ class AddCredentialViewController: UIViewController, Themeable {
     }()
 
     init(didSaveAction: @escaping (LoginEntry) -> Void,
+         dismisAction: @escaping () -> Void,
          themeManager: ThemeManager = AppContainer.shared.resolve(),
          notificationCenter: NotificationCenter = NotificationCenter.default) {
         self.didSaveAction = didSaveAction
+        self.dismissAction = dismisAction
         self.themeManager = themeManager
         self.notificationCenter = notificationCenter
         super.init(nibName: nil, bundle: nil)
@@ -89,6 +92,11 @@ class AddCredentialViewController: UIViewController, Themeable {
         KeyboardHelper.defaultHelper.addDelegate(self)
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        dismissAction()
+    }
+
     @objc func addCredential() {
         guard let hostname = websiteField.text,
               let username = usernameField.text,
@@ -110,9 +118,11 @@ class AddCredentialViewController: UIViewController, Themeable {
                 )
             )
         )
+        dismissAction()
     }
 
     @objc func cancel() {
+        dismissAction()
         dismiss(animated: true)
     }
 

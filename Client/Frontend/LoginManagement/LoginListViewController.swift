@@ -305,6 +305,7 @@ private extension LoginListViewController {
     }
 
     @objc func presentAddCredential() {
+        self.removeObservers()
         let addController = AddCredentialViewController { [weak self] record in
             self?.presentedViewController?.dismiss(animated: true) {
                 self?.viewModel.save(loginRecord: record) { _ in
@@ -314,6 +315,9 @@ private extension LoginListViewController {
                     }
                 }
             }
+        } dismisAction: { [weak self] in
+            guard let self = self else { return }
+            self.createObservers()
         }
 
         let controller = UINavigationController(
