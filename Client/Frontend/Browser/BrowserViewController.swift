@@ -1,6 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0
+// file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Foundation
 import Photos
@@ -43,6 +43,7 @@ class BrowserViewController: UIViewController {
         .title,
     ]
 
+    weak var browserDelegate: BrowserDelegate?
     var homepageViewController: HomepageViewController?
     var libraryViewController: LibraryViewController?
     var webViewContainer: UIView!
@@ -52,7 +53,7 @@ class BrowserViewController: UIViewController {
     var clipboardBarDisplayHandler: ClipboardBarDisplayHandler?
     var readerModeBar: ReaderModeBarView?
     var readerModeCache: ReaderModeCache
-    var statusBarOverlay: UIView = UIView()
+    var statusBarOverlay = UIView()
     var searchController: SearchViewController?
     var screenshotHelper: ScreenshotHelper!
     var searchTelemetry: SearchTelemetry?
@@ -61,7 +62,7 @@ class BrowserViewController: UIViewController {
     var zoomPageBar: ZoomPageBar?
     lazy var mailtoLinkHandler = MailtoLinkHandler()
     var urlFromAnotherApp: UrlToOpenModel?
-    var isCrashAlertShowing: Bool = false
+    var isCrashAlertShowing = false
     var currentMiddleButtonState: MiddleButtonState?
     private var customSearchBarButton: UIBarButtonItem?
     var openedUrlFromExternalSource = false
@@ -90,22 +91,28 @@ class BrowserViewController: UIViewController {
     let tabManager: TabManager
     let ratingPromptManager: RatingPromptManager
 
-    // Header can contain the top url bar, bottomContainer only contains toolbar
-    // OverKeyboardContainer contains the reader mode and maybe the bottom url bar
+    // Header stack view can contain the top url bar or top reader mode
     var header: BaseAlphaStackView = .build { _ in }
+
+    // OverKeyboardContainer stack view contains the bottom reader mode and the bottom url bar
     var overKeyboardContainer: BaseAlphaStackView = .build { _ in }
+
+    // BottomContainer stack view only contains toolbar
     var bottomContainer: BaseAlphaStackView = .build { _ in }
+
+    // Alert content that appears on top of the content
+    // ex: Find In Page, Zoom page bar, SnackBars
+    var bottomContentStackView: BaseAlphaStackView = .build { stackview in
+        stackview.isClearBackground = true
+    }
+
+    // The content container contains the homepage or webview. Embeded by the coordinator.
+    var contentContainer: ContentContainer = .build { _ in }
 
     lazy var isBottomSearchBar: Bool = {
         guard isSearchBarLocationFeatureEnabled else { return false }
         return searchBarPosition == .bottom
     }()
-
-    // Alert content that appears on top of the footer should be added to this view.
-    // ex: Find In Page, SnackBars
-    var bottomContentStackView: BaseAlphaStackView = .build { stackview in
-        stackview.isClearBackground = true
-    }
 
     private var topTouchArea: UIButton!
 
@@ -378,7 +385,11 @@ class BrowserViewController: UIViewController {
 
         view.bringSubviewToFront(webViewContainerBackdrop)
         webViewContainerBackdrop.alpha = 1
-        webViewContainer.alpha = 0
+        if !AppConstants.useCoordinators {
+            webViewContainer.alpha = 0
+        } else {
+            contentContainer.alpha = 0
+        }
         urlBar.locationContainer.alpha = 0
         topTabsViewController?.switchForegroundStatus(isInForeground: false)
         presentedViewController?.popoverPresentationController?.containerView?.alpha = 0
@@ -394,7 +405,11 @@ class BrowserViewController: UIViewController {
             delay: 0,
             options: UIView.AnimationOptions(),
             animations: {
-                self.webViewContainer.alpha = 1
+                if !AppConstants.useCoordinators {
+                    self.webViewContainer.alpha = 1
+                } else {
+                    self.contentContainer.alpha = 1
+                }
                 self.urlBar.locationContainer.alpha = 1
                 self.presentedViewController?.popoverPresentationController?.containerView?.alpha = 1
                 self.presentedViewController?.view.alpha = 1
@@ -544,8 +559,12 @@ class BrowserViewController: UIViewController {
         webViewContainerBackdrop.alpha = 0
         view.addSubview(webViewContainerBackdrop)
 
-        webViewContainer = UIView()
-        view.addSubview(webViewContainer)
+        if AppConstants.useCoordinators {
+            view.addSubview(contentContainer)
+        } else {
+            webViewContainer = UIView()
+            view.addSubview(webViewContainer)
+        }
 
         topTouchArea = UIButton()
         topTouchArea.isAccessibilityElement = false
@@ -570,6 +589,11 @@ class BrowserViewController: UIViewController {
         toolbar = TabToolbar()
         bottomContainer.addArrangedSubview(toolbar)
         view.addSubview(bottomContainer)
+
+        if AppConstants.useCoordinators {
+            // StatusBarOverlay at the back so homepage wallpaper with bottom URL bar can be seen under the status bar
+            view.sendSubviewToBack(statusBarOverlay)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -596,6 +620,8 @@ class BrowserViewController: UIViewController {
         if !AppConstants.useCoordinators {
             performSurveySurfaceCheck()
         }
+
+        urlBar.searchEnginesDidUpdate()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -716,6 +742,15 @@ class BrowserViewController: UIViewController {
             make.edges.equalTo(view)
         }
 
+        if AppConstants.useCoordinators {
+            NSLayoutConstraint.activate([
+                contentContainer.topAnchor.constraint(equalTo: header.bottomAnchor),
+                contentContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                contentContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                contentContainer.bottomAnchor.constraint(equalTo: overKeyboardContainer.topAnchor),
+            ])
+        }
+
         updateHeaderConstraints()
     }
 
@@ -723,8 +758,14 @@ class BrowserViewController: UIViewController {
         header.snp.remakeConstraints { make in
             if isBottomSearchBar {
                 make.left.right.top.equalTo(view)
-                // Making sure we cover at least the status bar
-                make.bottom.equalTo(view.safeArea.top)
+                if AppConstants.useCoordinators {
+                    // The status bar is covered by the statusBarOverlay,
+                    // if we don't have the URL bar at the top then header height is 0
+                    make.height.equalTo(0)
+                } else {
+                    // Making sure we cover at least the status bar
+                    make.bottom.equalTo(view.safeArea.top)
+                }
             } else {
                 scrollController.headerTopConstraint = make.top.equalTo(view.safeArea.top).constraint
                 make.left.right.equalTo(view)
@@ -744,10 +785,12 @@ class BrowserViewController: UIViewController {
             make.height.equalTo(UIConstants.ToolbarHeight)
         }
 
-        webViewContainer.snp.remakeConstraints { make in
-            make.left.right.equalTo(view)
-            make.top.equalTo(header.snp.bottom)
-            make.bottom.equalTo(overKeyboardContainer.snp.top)
+        if !AppConstants.useCoordinators {
+            webViewContainer.snp.remakeConstraints { make in
+                make.left.right.equalTo(view)
+                make.top.equalTo(header.snp.bottom)
+                make.bottom.equalTo(overKeyboardContainer.snp.top)
+            }
         }
 
         // Setup the bottom toolbar
@@ -766,13 +809,15 @@ class BrowserViewController: UIViewController {
             make.leading.trailing.equalTo(view)
         }
 
-        // Remake constraints even if we're already showing the home controller.
-        // The home controller may change sizes if we tap the URL bar while on about:home.
-        homepageViewController?.view.snp.remakeConstraints { make in
-            make.top.equalTo(isBottomSearchBar ? view : header.snp.bottom)
-            make.left.right.equalTo(view)
-            let homePageBottomOffset: CGFloat = isBottomSearchBar ? urlBarHeightConstraintValue ?? 0 : 0
-            make.bottom.equalTo(bottomContainer.snp.top).offset(-homePageBottomOffset)
+        if !AppConstants.useCoordinators {
+            // Remake constraints even if we're already showing the home controller.
+            // The home controller may change sizes if we tap the URL bar while on about:home.
+            homepageViewController?.view.snp.remakeConstraints { make in
+                make.top.equalTo(isBottomSearchBar ? view : header.snp.bottom)
+                make.left.right.equalTo(view)
+                let homePageBottomOffset: CGFloat = isBottomSearchBar ? urlBarHeightConstraintValue ?? 0 : 0
+                make.bottom.equalTo(bottomContainer.snp.top).offset(-homePageBottomOffset)
+            }
         }
 
         bottomContentStackView.snp.remakeConstraints { remake in
@@ -963,6 +1008,41 @@ class BrowserViewController: UIViewController {
         statusBarOverlay.isHidden = false
     }
 
+    func embedContent(_ viewController: ContentContainable, forceEmbed: Bool = false) {
+        guard contentContainer.canAdd(content: viewController) || forceEmbed else { return }
+
+        addChild(viewController)
+        contentContainer.add(content: viewController)
+        viewController.didMove(toParent: self)
+
+        UIAccessibility.post(notification: UIAccessibility.Notification.screenChanged, argument: nil)
+    }
+
+    /// Show the home page embedded in the contentContainer
+    /// - Parameter inline: Inline is true when the homepage is created from the tab tray, a long press
+    /// on the tab bar to open a new tab or by pressing the home page button on the tab bar. Inline is false when
+    /// it's the zero search page, aka when the home page is shown by clicking the url bar from a loaded web page.
+    func showEmbeddedHomepage(inline: Bool) {
+        hideReaderModeBar(animated: false)
+
+        // Make sure reload button is hidden on homepage
+        urlBar.locationView.reloadButton.reloadButtonState = .disabled
+
+        browserDelegate?.showHomepage(inline: inline,
+                                      homepanelDelegate: self,
+                                      libraryPanelDelegate: self,
+                                      sendToDeviceDelegate: self,
+                                      overlayManager: overlayManager)
+    }
+
+    func showEmbeddedWebview() {
+        // Make sure reload button is working when showing webview
+        urlBar.locationView.reloadButton.reloadButtonState = .reload
+
+        browserDelegate?.show(webView: nil)
+    }
+
+    // FXIOS-6036 - Remove this function as part of cleanup
     /// Show the home page
     /// - Parameter inline: Inline is true when the homepage is created from the tab tray, a long press
     /// on the tab bar to open a new tab or by pressing the home page button on the tab bar. Inline is false when
@@ -1001,6 +1081,7 @@ class BrowserViewController: UIViewController {
             })
     }
 
+    // FXIOS-6036 - Remove this function as part of cleanup
     /// Once the homepage is created, browserViewController keeps a reference to it, never setting it to nil during
     /// an app session. The homepage can be nil in the case of a user having a Blank Page or custom URL as it's new tab and homepage
     private func createHomepage(inline: Bool) {
@@ -1020,6 +1101,7 @@ class BrowserViewController: UIViewController {
         view.bringSubviewToFront(overKeyboardContainer)
     }
 
+    // FXIOS-6036 - Remove this function as part of cleanup
     func hideHomepage(completion: (() -> Void)? = nil) {
         guard let homepageViewController = self.homepageViewController else { return }
 
@@ -1053,19 +1135,31 @@ class BrowserViewController: UIViewController {
     func updateInContentHomePanel(_ url: URL?, focusUrlBar: Bool = false) {
         let isAboutHomeURL = url.flatMap { InternalURL($0)?.isAboutHomeURL } ?? false
         guard let url = url else {
-            hideHomepage()
+            if !AppConstants.useCoordinators {
+                hideHomepage()
+            } else {
+                showEmbeddedWebview()
+            }
             urlBar.locationView.reloadButton.reloadButtonState = .disabled
             return
         }
 
         if isAboutHomeURL {
-            showHomepage(inline: true)
+            if !AppConstants.useCoordinators {
+                showHomepage(inline: true)
+            } else {
+                showEmbeddedHomepage(inline: true)
+            }
 
             if userHasPressedHomeButton {
                 userHasPressedHomeButton = false
             }
         } else if !url.absoluteString.hasPrefix("\(InternalURL.baseUrl)/\(SessionRestoreHandler.path)") {
-            hideHomepage()
+            if !AppConstants.useCoordinators {
+                hideHomepage()
+            } else {
+                showEmbeddedWebview()
+            }
             urlBar.shouldHideReloadButton(shouldUseiPadSetup())
         }
 
@@ -1769,7 +1863,11 @@ extension BrowserViewController {
 // MARK: - LegacyTabDelegate
 extension BrowserViewController: LegacyTabDelegate {
     func tab(_ tab: Tab, didCreateWebView webView: WKWebView) {
-        webView.frame = webViewContainer.frame
+        if !AppConstants.useCoordinators {
+            webView.frame = webViewContainer.frame
+        } else {
+            browserDelegate?.show(webView: webView)
+        }
         // Observers that live as long as the tab. Make sure these are all cleared in willDeleteWebView below!
         KVOs.forEach { webView.addObserver(self, forKeyPath: $0.rawValue, options: .new, context: nil) }
         webView.scrollView.addObserver(self.scrollController, forKeyPath: KVOConstants.contentSize.rawValue, options: .new, context: nil)
@@ -2102,9 +2200,14 @@ extension BrowserViewController: TabManagerDelegate {
             ReaderModeHandlers.readerModeCache = readerModeCache
 
             scrollController.tab = tab
-            webViewContainer.addSubview(webView)
-            webView.snp.makeConstraints { make in
-                make.left.right.top.bottom.equalTo(self.webViewContainer)
+
+            if !AppConstants.useCoordinators {
+                webViewContainer.addSubview(webView)
+                webView.snp.makeConstraints { make in
+                    make.left.right.top.bottom.equalTo(self.webViewContainer)
+                }
+            } else {
+                browserDelegate?.show(webView: webView)
             }
 
             webView.accessibilityLabel = .WebViewAccessibilityLabel

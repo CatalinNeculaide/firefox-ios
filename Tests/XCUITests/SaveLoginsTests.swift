@@ -1,6 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0
+// file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import XCTest
 
@@ -181,10 +181,6 @@ class SaveLoginTest: BaseTestCase {
 
     // Smoketest
     func testSavedLoginAutofilled() {
-        if iPad() {
-            navigator.performAction(Action.CloseURLBarOpen)
-            navigator.nowAt(NewTabScreen)
-        }
         navigator.openURL(urlLogin)
         waitUntilPageLoad()
         // Provided text fields are completely empty
@@ -208,10 +204,6 @@ class SaveLoginTest: BaseTestCase {
 
         navigator.goto(TabTray)
         navigator.performAction(Action.OpenNewTabFromTabTray)
-        if iPad() {
-            navigator.performAction(Action.CloseURLBarOpen)
-            navigator.nowAt(NewTabScreen)
-        }
         navigator.openURL(urlLogin)
         waitUntilPageLoad()
         waitForExistence(app.webViews.textFields.element(boundBy: 0), timeout: 3)

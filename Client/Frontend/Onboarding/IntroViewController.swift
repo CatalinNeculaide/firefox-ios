@@ -1,6 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0
+// file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Foundation
 import UIKit
@@ -16,8 +16,6 @@ class IntroViewController: UIViewController, OnboardingViewControllerProtocol, T
     var themeManager: ThemeManager
     var themeObserver: NSObjectProtocol?
     var userDefaults: UserDefaultsInterface = UserDefaults.standard
-
-    private lazy var engagementNotificationHelper = EngagementNotificationHelper()
 
     struct UX {
         static let closeButtonSize: CGFloat = 30
@@ -244,8 +242,6 @@ extension IntroViewController: OnboardingCardDelegate {
                     }
 
                     NotificationCenter.default.post(name: .RegisterForPushNotifications, object: nil)
-
-                    self.engagementNotificationHelper.schedule()
                 }
                 self.showNextPage(.notification)
             }
