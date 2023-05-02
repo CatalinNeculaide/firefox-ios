@@ -9,10 +9,16 @@ import Shared
 /// Each scene has it's own scene coordinator, which is the root coordinator for a scene.
 class SceneCoordinator: BaseCoordinator, LaunchCoordinatorDelegate, LaunchFinishedLoadingDelegate {
     var window: UIWindow?
+    private let screenshotService: ScreenshotService
+    private let sceneContainer: SceneContainer
 
     init(scene: UIScene,
-         sceneSetupHelper: SceneSetupHelper = SceneSetupHelper()) {
-        self.window = sceneSetupHelper.configureWindowFor(scene, screenshotServiceDelegate: nil)
+         sceneSetupHelper: SceneSetupHelper = SceneSetupHelper(),
+         screenshotService: ScreenshotService = ScreenshotService(),
+         sceneContainer: SceneContainer = SceneContainer()) {
+        self.window = sceneSetupHelper.configureWindowFor(scene, screenshotServiceDelegate: screenshotService)
+        self.screenshotService = screenshotService
+        self.sceneContainer = sceneContainer
         let navigationController = sceneSetupHelper.createNavigationController()
         let router = DefaultRouter(navigationController: navigationController)
         super.init(router: router)
@@ -22,8 +28,10 @@ class SceneCoordinator: BaseCoordinator, LaunchCoordinatorDelegate, LaunchFinish
     }
 
     func start() {
+        router.setRootViewController(sceneContainer, hideBar: true)
+
         let launchScreenVC = LaunchScreenViewController(coordinator: self)
-        router.setRootViewController(launchScreenVC, hideBar: true)
+        router.push(launchScreenVC, animated: false)
     }
 
     // MARK: - LaunchFinishedLoadingDelegate
@@ -37,16 +45,18 @@ class SceneCoordinator: BaseCoordinator, LaunchCoordinatorDelegate, LaunchFinish
         startLaunch(with: launchType)
     }
 
+    func launchBrowser() {
+        startBrowser(with: nil)
+    }
+
+    // MARK: - Route handling
+
     /// Handles the specified route.
     ///
     /// - Parameter route: The route to handle.
     ///
-    func handle(route: Route) {
-        // TODO: Implement this function.
-    }
-
-    func launchBrowser() {
-        startBrowser(with: nil)
+    override func handle(route: Route) -> Bool {
+        return false
     }
 
     // MARK: - Helper methods
@@ -59,7 +69,8 @@ class SceneCoordinator: BaseCoordinator, LaunchCoordinatorDelegate, LaunchFinish
     }
 
     private func startBrowser(with launchType: LaunchType?) {
-        let browserCoordinator = BrowserCoordinator(router: router)
+        let browserCoordinator = BrowserCoordinator(router: router,
+                                                    screenshotService: screenshotService)
         add(child: browserCoordinator)
         browserCoordinator.start(with: launchType)
     }
@@ -67,6 +78,7 @@ class SceneCoordinator: BaseCoordinator, LaunchCoordinatorDelegate, LaunchFinish
     // MARK: - LaunchCoordinatorDelegate
 
     func didFinishLaunch(from coordinator: LaunchCoordinator) {
+        router.dismiss(animated: true)
         remove(child: coordinator)
         startBrowser(with: nil)
     }
@@ -74,6 +86,6 @@ class SceneCoordinator: BaseCoordinator, LaunchCoordinatorDelegate, LaunchFinish
     // MARK: - LaunchFinishedLoadingDelegate
 
     func didRequestToOpenInNewTab(url: URL, isPrivate: Bool, selectNewTab: Bool) {
-        // FXIOS-6030: Handle open in new tab route
+        // FXIOS-6033 #13682 - Enable didRequestToOpenInNewTab in BrowserCoordinator & SceneCoordinator
     }
 }

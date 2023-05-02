@@ -145,6 +145,7 @@ extension BrowserViewController: TabToolbarDelegate, PhotonActionSheetProtocol {
 
         let newPrivateTab = SingleActionViewModel(title: .KeyboardShortcuts.NewPrivateTab, iconString: ImageIdentifiers.newTab, iconType: .Image) { _ in
             let shouldFocusLocationField = self.newTabSettings == .blankPage
+            self.overlayManager.openNewTab(url: nil, newTabSettings: self.newTabSettings)
             self.openBlankNewTab(focusLocationField: shouldFocusLocationField, isPrivate: true)
         }.items
 
@@ -213,7 +214,7 @@ extension BrowserViewController: ToolBarActionMenuDelegate {
             show(toast: toast)
         default:
             SimpleToast().showAlertWithText(message,
-                                            bottomContainer: webViewContainer,
+                                            bottomContainer: alertContainer,
                                             theme: themeManager.currentTheme)
         }
     }

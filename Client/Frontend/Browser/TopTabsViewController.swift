@@ -11,7 +11,7 @@ import Common
 struct TopTabsUX {
     static let TopTabsViewHeight: CGFloat = 44
     static let TopTabsBackgroundShadowWidth: CGFloat = 12
-    static let MinTabWidth: CGFloat = 76
+    static let MinTabWidth: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 130 : 76
     static let MaxTabWidth: CGFloat = 220
     static let FaderPading: CGFloat = 8
     static let SeparatorWidth: CGFloat = 1
@@ -27,7 +27,7 @@ protocol TopTabsDelegate: AnyObject {
     func topTabsDidChangeTab()
 }
 
-class TopTabsViewController: UIViewController, Themeable {
+class TopTabsViewController: UIViewController, Themeable, Notifiable {
     // MARK: - Properties
     let tabManager: TabManager
     weak var delegate: TopTabsDelegate?
@@ -142,6 +142,9 @@ class TopTabsViewController: UIViewController, Themeable {
         listenForThemeChange(view)
         setupLayout()
 
+        setupNotifications(forObserver: self,
+                           observing: [.TabsTrayDidClose])
+
         // Setup UIDropInteraction to handle dragging and dropping
         // links onto the "New Tab" button.
         let dropInteraction = UIDropInteraction(delegate: topTabDisplayManager)
@@ -171,18 +174,18 @@ class TopTabsViewController: UIViewController, Themeable {
     }
 
     func updateTabCount(_ count: Int, animated: Bool = true) {
-        self.tabsButton.updateTabCount(count, animated: animated)
+        tabsButton.updateTabCount(count, animated: animated)
     }
 
     @objc
     func tabsTrayTapped() {
-        self.topTabDisplayManager.refreshStore(evenIfHidden: true)
+        topTabDisplayManager.refreshStore(evenIfHidden: true)
         delegate?.topTabsDidPressTabs()
     }
 
     @objc
     func newTabTapped() {
-        self.delegate?.topTabsDidPressNewTab(self.topTabDisplayManager.isPrivate)
+        delegate?.topTabsDidPressNewTab(self.topTabDisplayManager.isPrivate)
     }
 
     @objc
@@ -268,6 +271,16 @@ class TopTabsViewController: UIViewController, Themeable {
             topTabFader.setFader(forSides: .left)
         } else if collectionView.contentSize.width <= collectionView.frame.size.width { // all tabs are visible
             topTabFader.setFader(forSides: .none)
+        }
+    }
+
+    // MARK: - Notifiable
+    func handleNotifications(_ notification: Notification) {
+        switch notification.name {
+        case .TabsTrayDidClose:
+            refreshTabs()
+        default:
+            break
         }
     }
 }

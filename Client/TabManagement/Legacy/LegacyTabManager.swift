@@ -43,6 +43,11 @@ enum SwitchPrivacyModeResult {
     case usedExistingTab
 }
 
+struct BackupCloseTab {
+    var tab: Tab
+    var restorePosition: Int?
+}
+
 // TabManager must extend NSObjectProtocol in order to implement WKNavigationDelegate
 class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
     // MARK: - Variables
@@ -54,9 +59,8 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
     private var _selectedIndex = -1
     var selectedIndex: Int { return _selectedIndex }
     private let logger: Logger
+    var backupCloseTab: BackupCloseTab?
 
-    var didChangedPanelSelection = true
-    var didAddNewTab = true
     var tabDisplayType: TabDisplayType = .TabGrid
     let delaySelectingNewPopupTab: TimeInterval = 0.1
 
@@ -229,9 +233,14 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
     }
 
     // MARK: - Select tab
+
+    func selectTab(_ tab: Tab?, previous: Tab? = nil) {
+        selectTab(tab, previous: previous, sessionData: nil)
+    }
+
     // This function updates the _selectedIndex.
     // Note: it is safe to call this with `tab` and `previous` as the same tab, for use in the case where the index of the tab has changed (such as after deletion).
-    func selectTab(_ tab: Tab?, previous: Tab? = nil) {
+    func selectTab(_ tab: Tab?, previous: Tab? = nil, sessionData: Data?) {
         let previous = previous ?? selectedTab
 
         previous?.metadataManager?.updateTimerAndObserving(state: .tabSwitched, isPrivate: previous?.isPrivate ?? false)
@@ -251,7 +260,7 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
         preserveTabs()
 
         assert(tab === selectedTab, "Expected tab is selected")
-        selectedTab?.createWebview()
+        selectedTab?.createWebview(with: sessionData)
         selectedTab?.lastExecutedTime = Date.now()
 
         delegates.forEach { $0.get()?.tabManager(self, didSelectedTabChange: tab, previous: previous, isRestoring: store.isRestoringTabs) }
@@ -421,7 +430,7 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
                       isPrivate: isPrivate)
     }
 
-    func addTabsForURLs(_ urls: [URL], zombie: Bool) {
+    func addTabsForURLs(_ urls: [URL], zombie: Bool, shouldSelectTab: Bool) {
         if urls.isEmpty {
             return
         }
@@ -431,8 +440,11 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
             tab = addTab(URLRequest(url: url), flushToDisk: false, zombie: zombie)
         }
 
-        // Select the most recent.
-        selectTab(tab)
+        if shouldSelectTab {
+            // Select the most recent.
+            selectTab(tab)
+        }
+
         // Okay now notify that we bulk-loaded so we can adjust counts and animate changes.
         delegates.forEach { $0.get()?.tabManagerDidAddTabs(self) }
 
@@ -711,7 +723,9 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
         // Note: The recently closed tab list is only updated when the undo
         // snackbar disappears and does not update if someone taps on undo button
         recentlyClosedTabs.suffix(10).forEach { tab in
-            if let url = tab.lastKnownUrl, !(InternalURL(url)?.isAboutURL ?? false), !tab.isPrivate {
+            if let url = tab.lastKnownUrl,
+               !(InternalURL(url)?.isAboutURL ?? false),
+               !tab.isPrivate {
                 profile.recentlyClosedTabs.addTab(url as URL,
                                                   title: tab.lastTitle,
                                                   lastExecutedTime: tab.lastExecutedTime)
@@ -814,6 +828,23 @@ class LegacyTabManager: NSObject, FeatureFlaggable, TabManager {
             // select previous tab
             selectTab(tabToSelect, previous: nil)
         }
+        delegates.forEach { $0.get()?.tabManagerUpdateCount() }
+        storeChanges()
+    }
+
+    func undoCloseTab(tab: Tab, position: Int?) {
+        let tabToSelect = selectedTab
+        if let index = position {
+            tabs.insert(tab, at: index)
+        } else {
+            tabs.append(tab)
+        }
+
+        // Select previous selected tab
+        if let tabToSelect = tabToSelect {
+            selectTab(tabToSelect, previous: nil)
+        }
+
         delegates.forEach { $0.get()?.tabManagerUpdateCount() }
         storeChanges()
     }

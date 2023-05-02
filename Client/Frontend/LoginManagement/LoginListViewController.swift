@@ -171,7 +171,11 @@ class LoginListViewController: SensitiveViewController, Themeable {
         super.viewDidAppear(animated)
 
         guard settingsDelegate != nil else {
-            settingsDelegate = sceneForVC?.browserViewController
+            if CoordinatorFlagManager.isCoordinatorEnabled {
+                settingsDelegate = sceneForVC?.coordinatorBrowserViewController
+            } else {
+                settingsDelegate = sceneForVC?.browserViewController
+            }
 
             return
         }
@@ -181,6 +185,8 @@ class LoginListViewController: SensitiveViewController, Themeable {
         let theme = themeManager.currentTheme
         viewModel.theme = theme
         loginDataSource.viewModel = viewModel
+        tableView.reloadSections(IndexSet(integer: LoginListViewController.loginsSettingsSection),
+                                 with: .none)
 
         view.backgroundColor = theme.colors.layer1
         tableView.separatorColor = theme.colors.borderPrimary

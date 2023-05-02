@@ -73,9 +73,9 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
     var refreshStoreOperation: (() -> Void)?
     weak var tabDisplayCompletionDelegate: TabDisplayCompletionDelegate?
     var tabDisplayType: TabDisplayType = .TabGrid
-    fileprivate let tabManager: TabManager
-    fileprivate let collectionView: UICollectionView
-    fileprivate var tabDisplayer: TabDisplayer
+    private let tabManager: TabManager
+    private let collectionView: UICollectionView
+    private var tabDisplayer: TabDisplayer
     private let tabReuseIdentifier: String
     private var hasSentInactiveTabShownEvent = false
     var profile: Profile
@@ -97,6 +97,39 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
 
     var orderedTabs: [Tab] {
         return filteredTabs
+    }
+
+    var tabGroups: [ASGroup<Tab>]?
+    var tabsInAllGroups: [Tab]? {
+        (tabGroups?.map {$0.groupedItems}.flatMap {$0})
+    }
+
+    private(set) var isPrivate = false
+
+    private var isSelectedTabTypeEmpty: Bool {
+        return isPrivate ? tabManager.privateTabs.isEmpty : tabManager.normalTabs.isEmpty
+    }
+
+    // Dragging on the collection view is either an 'active drag' where the item is moved, or
+    // that the item has been long pressed on (and not moved yet), and this gesture recognizer has been triggered
+    var isDragging: Bool {
+        return collectionView.hasActiveDrag || isLongPressGestureStarted
+    }
+
+    private var isLongPressGestureStarted: Bool {
+        var started = false
+        collectionView.gestureRecognizers?.forEach { recognizer in
+            if let recognizer = recognizer as? UILongPressGestureRecognizer,
+               recognizer.state == .began || recognizer.state == .changed {
+                started = true
+            }
+        }
+        return started
+    }
+
+    var shouldPresentUndoToastOnHomepage: Bool {
+        guard !isPrivate else { return false }
+        return tabManager.normalTabs.count == 1
     }
 
     func getRegularOrderedTabs() -> [Tab]? {
@@ -134,30 +167,6 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
         let uuids: [String] = tabs.map { $0.tabUUID }
         tabDisplayOrder.regularTabUUID = uuids
         TabDisplayOrder.encode(tabDisplayOrder: tabDisplayOrder)
-    }
-
-    var tabGroups: [ASGroup<Tab>]?
-    var tabsInAllGroups: [Tab]? {
-        (tabGroups?.map {$0.groupedItems}.flatMap {$0})
-    }
-
-    private(set) var isPrivate = false
-
-    // Dragging on the collection view is either an 'active drag' where the item is moved, or
-    // that the item has been long pressed on (and not moved yet), and this gesture recognizer has been triggered
-    var isDragging: Bool {
-        return collectionView.hasActiveDrag || isLongPressGestureStarted
-    }
-
-    fileprivate var isLongPressGestureStarted: Bool {
-        var started = false
-        collectionView.gestureRecognizers?.forEach { recognizer in
-            if let recognizer = recognizer as? UILongPressGestureRecognizer,
-               recognizer.state == .began || recognizer.state == .changed {
-                started = true
-            }
-        }
-        return started
     }
 
     @discardableResult
@@ -314,7 +323,8 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
         return filteredTabs.firstIndex(of: tab)
     }
 
-    func togglePrivateMode(isOn: Bool, createTabOnEmptyPrivateMode: Bool,
+    func togglePrivateMode(isOn: Bool,
+                           createTabOnEmptyPrivateMode: Bool,
                            shouldSelectMostRecentTab: Bool = false) {
         guard isPrivate != isOn else { return }
 
@@ -368,7 +378,9 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
         return nil
     }
 
-    func refreshStore(evenIfHidden: Bool = false, shouldAnimate: Bool = false, completion: (() -> Void)? = nil) {
+    func refreshStore(evenIfHidden: Bool = false,
+                      shouldAnimate: Bool = false,
+                      completion: (() -> Void)? = nil) {
         operations.removeAll()
         dataStore.removeAll()
 
@@ -440,22 +452,39 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
         }
     }
 
-    // The user has tapped the close button or has swiped away the cell
+    /// Close tab action for Top tabs type
     func closeActionPerformed(forCell cell: UICollectionViewCell) {
-        if isDragging {
-            return
-        }
+        guard !isDragging else { return }
 
-        guard let index = collectionView.indexPath(for: cell)?.item, let tab = dataStore.at(index) else { return }
+        guard let index = collectionView.indexPath(for: cell)?.item,
+                let tab = dataStore.at(index) else { return }
+
+        performCloseAction(for: tab)
+    }
+
+    /// Close tab action for Grid type
+    func performCloseAction(for tab: Tab) {
+        guard !isDragging else { return }
 
         getTabsAndUpdateInactiveState { tabGroup, tabsToDisplay in
-            if self.isPrivate == false, tabsToDisplay.count + (self.tabsInAllGroups?.count ?? 0) == 1 {
+            // If it is the last tab of regular mode we automatically create an new tab
+            if !self.isPrivate,
+               tabsToDisplay.count + (self.tabsInAllGroups?.count ?? 0) == 1 {
                 self.tabManager.removeTabs([tab])
                 self.tabManager.selectTab(self.tabManager.addTab())
                 return
             }
 
             self.tabManager.removeTab(tab)
+        }
+    }
+
+    func undoCloseTab(tab: Tab, index: Int?) {
+        tabManager.undoCloseTab(tab: tab, position: index)
+        _ = profile.recentlyClosedTabs.popFirstTab()
+
+        refreshStore {
+            self.updateCellFor(tab: tab, selectedTabChanged: true)
         }
     }
 
@@ -512,9 +541,10 @@ class TabDisplayManager: NSObject, FeatureFlaggable {
 extension TabDisplayManager: UICollectionViewDataSource {
     @objc
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        if tabDisplayType == .TopTabTray {
+        guard tabDisplayType != .TopTabTray else {
             return dataStore.count + (tabGroups?.count ?? 0)
         }
+
         switch TabDisplaySection(rawValue: section) {
         case .inactiveTabs:
             // Hide inactive tray if there are no inactive tabs
@@ -531,7 +561,9 @@ extension TabDisplayManager: UICollectionViewDataSource {
         }
     }
 
-    func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
+    func collectionView(_ collectionView: UICollectionView,
+                        viewForSupplementaryElementOfKind kind: String,
+                        at indexPath: IndexPath) -> UICollectionReusableView {
         if tabGroups != nil,
            let view = collectionView.dequeueReusableSupplementaryView(ofKind: UICollectionView.elementKindSectionHeader,
                                                                       withReuseIdentifier: GridTabViewController.independentTabsHeaderIdentifier,
@@ -600,7 +632,7 @@ extension TabDisplayManager: UICollectionViewDataSource {
     @objc
     func numberOfSections(in collectionView: UICollectionView) -> Int {
         if tabDisplayType == .TopTabTray { return 1 }
-        return  TabDisplaySection.allCases.count
+        return TabDisplaySection.allCases.count
     }
 }
 
@@ -653,13 +685,12 @@ extension TabDisplayManager: InactiveTabsDelegate {
         collectionView.reloadItems(at: [indexPath])
 
         cfrDelegate?.presentUndoToast(tabsCount: tabsCount,
-                                      completion: { shouldClose in
-            guard shouldClose else {
-                self.undoInactiveTabsClose()
+                                      completion: { undoButtonPressed in
+            guard !undoButtonPressed else {
+                self.closeInactiveTabs()
                 return
             }
-
-            self.closeInactiveTabs()
+            self.undoInactiveTabsClose()
         })
     }
 
@@ -854,16 +885,19 @@ extension TabDisplayManager: UICollectionViewDropDelegate {
             saveRegularOrderedTabs(from: filteredTabs)
         }
 
-        dataStore.removeAll()
-
-        filteredTabs.forEach {
-            dataStore.insert($0)
-        }
-
-        let section = tabDisplayType == .TopTabTray ? 0 : TabDisplaySection.regularTabs.rawValue
-        let start = IndexPath(row: sourceIndex, section: section)
-        let end = IndexPath(row: destinationIndexPath.item, section: section)
+        /// According to Apple's documentation the best place to make the changes to the collectionView and dataStore is
+        /// during the completion call of performBatchUpdates
         updateWith(animationType: .moveTab) { [weak self] in
+            self?.dataStore.removeAll()
+
+            self?.filteredTabs.forEach {
+                self?.dataStore.insert($0)
+            }
+
+            let section = self?.tabDisplayType == .TopTabTray ? 0 : TabDisplaySection.regularTabs.rawValue
+            let start = IndexPath(row: sourceIndex, section: section)
+            let end = IndexPath(row: destinationIndexPath.item, section: section)
+
             self?.collectionView.moveItem(at: start, to: end)
         }
     }
@@ -894,11 +928,20 @@ extension TabDisplayManager: UICollectionViewDropDelegate {
 
 extension TabDisplayManager: TabEventHandler {
     func tabDidSetScreenshot(_ tab: Tab, hasHomeScreenshot: Bool) {
-        updateCellFor(tab: tab, selectedTabChanged: false)
+        guard let indexPath = getIndexPath(tab: tab) else { return }
+        refreshCell(atIndexPath: indexPath)
     }
 
     func tab(_ tab: Tab, didChangeURL url: URL) {
-        updateCellFor(tab: tab, selectedTabChanged: false)
+        guard let indexPath = getIndexPath(tab: tab) else { return }
+        refreshCell(atIndexPath: indexPath)
+    }
+
+    private func getIndexPath(tab: Tab) -> IndexPath? {
+        guard let index = dataStore.index(of: tab) else { return nil }
+        let section = tabDisplayType == .TopTabTray ? 0 : TabDisplaySection.regularTabs.rawValue
+
+        return IndexPath(row: index, section: section)
     }
 
     private func updateCellFor(tab: Tab, selectedTabChanged: Bool) {
@@ -933,7 +976,8 @@ extension TabDisplayManager: TabEventHandler {
     }
 
     private func refreshCell(atIndexPath indexPath: IndexPath, forceUpdate: Bool = true) {
-        guard let cell = collectionView.cellForItem(at: indexPath) as? TabTrayCell, let tab = dataStore.at(indexPath.row) else { return }
+        guard let cell = collectionView.cellForItem(at: indexPath) as? TabTrayCell,
+              let tab = dataStore.at(indexPath.row) else { return }
 
         // Only update from nextTabIndex if needed
         guard forceUpdate || cell.isSelectedTab else { return }
@@ -951,6 +995,7 @@ extension TabDisplayManager: TabEventHandler {
     }
 }
 
+// MARK: - TabManagerDelegate
 extension TabDisplayManager: TabManagerDelegate {
     func tabManager(_ tabManager: TabManager, didSelectedTabChange selected: Tab?, previous: Tab?, isRestoring: Bool) {
         cancelDragAndGestures()
@@ -970,18 +1015,14 @@ extension TabDisplayManager: TabManagerDelegate {
     }
 
     func tabManager(_ tabManager: TabManager, didAddTab tab: Tab, placeNextToParentTab: Bool, isRestoring: Bool) {
-        if isRestoring {
-            return
-        }
+        guard !isRestoring else { return }
 
         if cancelDragAndGestures() {
             refreshStore()
             return
         }
 
-        if tab.isPrivate != self.isPrivate {
-            return
-        }
+        guard tab.isPrivate == self.isPrivate else { return }
 
         updateWith(animationType: .addTab) { [unowned self] in
             let indexToPlaceTab = getIndexToPlaceTab(placeNextToParentTab: placeNextToParentTab)
@@ -1017,7 +1058,7 @@ extension TabDisplayManager: TabManagerDelegate {
             return
         }
 
-        let type = tabManager.normalTabs.isEmpty ? TabAnimationType.removedLastTab : TabAnimationType.removedNonLastTab
+        let type = isSelectedTabTypeEmpty ? TabAnimationType.removedLastTab : TabAnimationType.removedNonLastTab
 
         updateWith(animationType: type) { [weak self] in
             guard let removed = self?.dataStore.remove(tab) else { return }
@@ -1046,9 +1087,7 @@ extension TabDisplayManager: TabManagerDelegate {
         /// collectionView is not visible the dataSource section/items differs from the actions to be perform
         /// which causes the crash
         collectionView.numberOfItems(inSection: 0)
-        collectionView.performBatchUpdates({ [weak self] in
-            // Baseline animation speed is 1.0, which is too slow, this (odd) code sets it to 3x
-            self?.collectionView.forFirstBaselineLayout.layer.speed = 3.0
+        collectionView.performBatchUpdates({
             operation()
         }, completion: { [weak self] (done) in
             self?.performingChainedOperations = false
